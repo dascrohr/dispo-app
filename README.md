@@ -50,3 +50,4 @@ Optional: eigene RLS-Policies ergänzen (für MVP kannst du mit Admin UI arbeite
 - **Grün**: Freitag ohne Planung (Nachzügler).
 
 Viel Erfolg! ✨
+ 
