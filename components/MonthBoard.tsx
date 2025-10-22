@@ -2,7 +2,7 @@
 'use client';
 
 import BoardCell from './BoardCell';
-import { daysInMonth } from '@/lib/month';
+import { daysInMonth } from '../lib/month';
 
 type Technician = { id: string; name: string };
 type DayData = { status: 'verfuegbar'|'krank'|'urlaub'|'helfer'; totalMin: number; feierabendMin: number; isFriday: boolean };
