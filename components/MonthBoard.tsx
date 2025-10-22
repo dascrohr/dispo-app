@@ -1,20 +1,18 @@
-
 'use client';
-
 import BoardCell from './BoardCell';
 import { daysInMonth } from '../lib/month';
 
 type Technician = { id: string; name: string };
 type DayData = { status: 'verfuegbar'|'krank'|'urlaub'|'helfer'; totalMin: number; feierabendMin: number; isFriday: boolean };
-
 type Props = {
   year: number;
   month: number; // 1-12
   technicians: Technician[];
-  data: Record<string, Record<number, DayData>>; // data[technicianId][day]
+  data: Record<string, Record<number, DayData>>;
+  onCellClick?: (args:{technikerId:string; technikerName:string; day:number}) => void;
 };
 
-export default function MonthBoard({year, month, technicians, data}: Props) {
+export default function MonthBoard({year, month, technicians, data, onCellClick}: Props) {
   const dim = daysInMonth(year, month);
   return (
     <div className="w-full overflow-auto">
@@ -30,12 +28,14 @@ export default function MonthBoard({year, month, technicians, data}: Props) {
               {Array.from({length: dim}, (_,i)=>i+1).map(day => {
                 const dd = data[t.id]?.[day];
                 return (
-                  <BoardCell key={`${t.id}-${day}`}
-                    status={dd?.status ?? 'verfuegbar'}
-                    isFriday={dd?.isFriday ?? false}
-                    totalMin={dd?.totalMin ?? 0}
-                    feierabendMin={dd?.feierabendMin ?? 540}
-                  />
+                  <div key={`${t.id}-${day}`} onClick={()=>onCellClick?.({technikerId:t.id, technikerName:t.name, day})} className="cursor-pointer">
+                    <BoardCell
+                      status={dd?.status ?? 'verfuegbar'}
+                      isFriday={dd?.isFriday ?? false}
+                      totalMin={dd?.totalMin ?? 0}
+                      feierabendMin={dd?.feierabendMin ?? 540}
+                    />
+                  </div>
                 );
               })}
             </>
