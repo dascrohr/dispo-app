@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabaseServer';
 
+export const dynamic = 'force-dynamic';
+
 function minutesBetween(a: string, b: string) {
   const [ah, am] = a.split(':').map(Number);
   const [bh, bm] = b.split(':').map(Number);
@@ -53,23 +55,29 @@ export async function GET(req: Request) {
     dayMeta[ymdStr] = { feierabendMin, isFriday, tagId: tag?.id };
   }
 
-  // Status-Index (techniker|ymd)
-  const statusIndex = new Map<string, string>();
+  // Status-Index (techniker|ymd) -> {status, hinweis}
+  const statusIndex = new Map<string, {status:string; hinweis:string|null}>();
   if (tage.length) {
-    const statusRes = await client.from('tag_status').select('tag_id,techniker_id,status').in('tag_id', tage.map(t=>t.id));
+    const statusRes = await client.from('tag_status')
+      .select('tag_id,techniker_id,status,hinweis')
+      .in('tag_id', tage.map(t=>t.id));
     if (statusRes.error) return NextResponse.json({ error: statusRes.error.message }, { status: 500 });
     const tagIdToDate = new Map<string, string>(tage.map(t => [t.id, t.datum]));
     for (const s of statusRes.data as any[]) {
       const dateStr = tagIdToDate.get(s.tag_id);
       if (!dateStr) continue;
-      statusIndex.set(`${s.techniker_id}|${dateStr}`, s.status);
+      statusIndex.set(`${s.techniker_id}|${dateStr}`, { status: s.status, hinweis: s.hinweis ?? null });
     }
   }
 
-  // Jobs aggregieren
+  // Jobs aggregieren (nur Tage dieses Monats)
   const totals: Record<string, number> = {};
   if (tage.length) {
-    const jobsRes = await client.from('job').select('tag_id, techniker_id, von, bis, dauer_min');
+    const tagIds = tage.map(t => t.id);
+    const jobsRes = await client
+      .from('job')
+      .select('tag_id, techniker_id, von, bis, dauer_min')
+      .in('tag_id', tagIds);
     if (jobsRes.error) return NextResponse.json({ error: jobsRes.error.message }, { status: 500 });
     const tagIdToDate = new Map<string, string>(tage.map(t => [t.id, t.datum]));
     for (const j of jobsRes.data as any[]) {
@@ -90,12 +98,15 @@ export async function GET(req: Request) {
       const meta = dayMeta[ymdStr];
       const key = `${t.id}|${ymdStr}`;
       const totalMin = totals[key] || 0;
-      const st = (statusIndex.get(key) as any) || 'verfuegbar';
+      const stObj = statusIndex.get(key);
+      const st = stObj?.status || 'verfuegbar';
+      const closed = stObj?.hinweis === 'closed';
       resp.data[t.id][ymdStr] = {
         status: st,
         totalMin,
         feierabendMin: meta?.feierabendMin ?? 9*60,
         isFriday: meta?.isFriday ?? false,
+        closed
       };
     }
   }

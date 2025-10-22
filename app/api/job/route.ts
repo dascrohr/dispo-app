@@ -1,11 +1,17 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabaseServer';
 
+export const dynamic = 'force-dynamic';
+
 function round15(mins: number) { return Math.round(mins / 15) * 15; }
 function minutesBetween(a: string, b: string) {
   const [ah, am] = a.split(':').map(Number);
   const [bh, bm] = b.split(':').map(Number);
   return (bh*60+bm) - (ah*60+am);
+}
+function normalizeTime(t?: string) {
+  if (!t) return t;
+  return t.length === 5 ? `${t}:00` : t; // '08:00' -> '08:00:00'
 }
 
 export async function POST(req: Request) {
@@ -17,14 +23,16 @@ export async function POST(req: Request) {
   if (!tagId || !technikerId || !von || !bis) {
     return NextResponse.json({ error: 'Pflichtfelder fehlen' }, { status: 400 });
   }
-  const dauer = round15(minutesBetween(von, bis));
+  const vVon = normalizeTime(von);
+  const vBis = normalizeTime(bis);
+  const dauer = round15(minutesBetween(vVon!, vBis!));
   const ins = await client.from('job').insert({
     tag_id: tagId, techniker_id: technikerId, meldungsnummer,
-    von, bis, dauer_min: dauer, aufgabe_id, objekt_id, ort_id, plz, helfer_id, bemerkung
-  }).select('id').single();
+    von: vVon, bis: vBis, dauer_min: dauer, aufgabe_id, objekt_id, ort_id, plz, helfer_id, bemerkung
+  }).select('*').single();
 
   if (ins.error) return NextResponse.json({ error: ins.error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, id: ins.data.id });
+  return NextResponse.json({ ok: true, job: ins.data });
 }
 
 export async function DELETE(req: Request) {
@@ -44,11 +52,15 @@ export async function PATCH(req: Request) {
   if (!id) return NextResponse.json({ error: 'id fehlt' }, { status: 400 });
 
   const updates: any = { meldungsnummer, aufgabe_id, objekt_id, ort_id, plz, helfer_id, bemerkung };
+  let vVon = von;
+  let vBis = bis;
   if (von && bis) {
-    updates.von = von; updates.bis = bis;
-    updates.dauer_min = round15(minutesBetween(von, bis));
+    vVon = normalizeTime(von);
+    vBis = normalizeTime(bis);
+    updates.von = vVon; updates.bis = vBis;
+    updates.dauer_min = round15(minutesBetween(vVon!, vBis!));
   }
-  const up = await client.from('job').update(updates).eq('id', id);
+  const up = await client.from('job').update(updates).select('*').eq('id', id).single();
   if (up.error) return NextResponse.json({ error: up.error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, job: up.data });
 }

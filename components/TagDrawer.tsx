@@ -18,6 +18,7 @@ function timeOptions() {
   return arr;
 }
 const TIMES = timeOptions();
+const t5 = (s?: string) => (s ? s.slice(0,5) : '');
 
 export default function TagDrawer(props: {
   open: boolean;
@@ -94,11 +95,20 @@ export default function TagDrawer(props: {
 
   async function saveStatus(next:string, hinweis?:string|null) {
     if (!tagId) return;
-    const res = await fetch('/api/status', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ tagId, technikerId, status: next, hinweis: hinweis ?? null })
-    });
-    if (res.ok) { setStatus(next); await reloadDay(); onChanged(); }
+    try {
+      const res = await fetch('/api/status', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ tagId, technikerId, status: next, hinweis: hinweis ?? null })
+      });
+      const j = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(j.error || `Status API ${res.status}`);
+      setStatus(next);
+      await reloadDay();   // Drawer-Liste aktualisieren
+      onChanged();         // Board neu laden
+    } catch (e:any) {
+      alert(e.message || 'Status setzen fehlgeschlagen');
+    }
   }
 
   async function deleteJob(id:string) {
@@ -159,7 +169,7 @@ export default function TagDrawer(props: {
             {jobs.map(j=>(
               <li key={j.id} className="border rounded p-2">
                 <div className="flex items-center justify-between">
-                  <div className="font-medium">{j.von}–{j.bis} • {j.meldungsnummer || 'ohne Meldung'}</div>
+                  <div className="font-medium">{t5(j.von)}–{t5(j.bis)} • {j.meldungsnummer || 'ohne Meldung'}</div>
                   <div className="flex gap-3">
                     <button className="text-xs underline"
                       onClick={()=>{ setEditingId(j.id as string); setNewJob({
