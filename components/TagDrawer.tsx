@@ -98,7 +98,7 @@ export default function TagDrawer(props: {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ tagId, technikerId, status: next, hinweis: hinweis ?? null })
     });
-    if (res.ok) { setStatus(next); onChanged(); }
+    if (res.ok) { setStatus(next); await reloadDay(); onChanged(); }
   }
 
   async function deleteJob(id:string) {
