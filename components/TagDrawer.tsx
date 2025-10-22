@@ -1,271 +1,76 @@
-'use client';
+import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
-import { useEffect, useState } from 'react';
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const client = createClient(supabaseUrl, supabaseKey);
 
-type Opt = { id: string; label: string };
-type Job = {
-  id?: string; meldungsnummer?: string; von?: string; bis?: string; dauer_min?: number;
-  aufgabe_id?: string; objekt_id?: string; ort_id?: string; plz?: string; helfer_id?: string; bemerkung?: string;
-};
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const year = url.searchParams.get('year');
+  const month = url.searchParams.get('month');
+  const day = url.searchParams.get('day');
+  const technikerId = url.searchParams.get('technikerId');
 
-function timeOptions() {
-  const arr:string[] = [];
-  for (let m=8*60; m<=21*60; m+=15) {
-    const h = String(Math.floor(m/60)).padStart(2,'0');
-    const mm = String(m%60).padStart(2,'0');
-    arr.push(`${h}:${mm}`);
-  }
-  return arr;
-}
-const TIMES = timeOptions();
-
-export default function TagDrawer(props: {
-  open: boolean;
-  onClose: () => void;
-  year: number; month: number; day: number;
-  technikerId: string; technikerName: string;
-  onChanged: () => void; // refetch board
-}) {
-  const { open, onClose, year, month, day, technikerId, technikerName, onChanged } = props;
-  const [loading, setLoading] = useState(false);
-  const [tagId, setTagId] = useState<string|undefined>();
-  const [status, setStatus] = useState<string>('verfuegbar');
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [aufgaben, setAufgaben] = useState<Opt[]>([]);
-  const [objekte, setObjekte] = useState<Opt[]>([]);
-  const [orte, setOrte] = useState<Opt[]>([]);
-  const [helfer, setHelfer] = useState<Opt[]>([]);
-  const [newJob, setNewJob] = useState<Job>({ von:'08:00', bis:'09:00' });
-  const [editingId, setEditingId] = useState<string|undefined>();
-
-  useEffect(() => {
-    if (!open) return;
-    setLoading(true);
-    fetch(`/api/day?year=${year}&month=${month}&day=${day}&technikerId=${technikerId}`, { cache: 'no-store' })
-      .then(r => r.json())
-      .then(json => {
-        setTagId(json.tagId);
-        setStatus(json.status ?? 'verfuegbar');
-        setJobs(json.jobs ?? []);
-        setAufgaben((json.aufgaben||[]).map((a:any)=>({id:a.id,label:a.code})));
-        setObjekte((json.objekte||[]).map((a:any)=>({id:a.id,label:a.code})));
-        setOrte((json.orte||[]).map((o:any)=>({id:o.id,label:`${o.plz} ${o.ort}`})));
-        setHelfer((json.techniker||[]).map((t:any)=>({id:t.id,label:t.name})));
-      }).finally(()=>setLoading(false));
-  }, [open, year, month, day, technikerId]);
-
-  async function reloadDay() {
-    const r = await fetch(`/api/day?year=${year}&month=${month}&day=${day}&technikerId=${technikerId}`, { cache: 'no-store' });
-    const js = await r.json();
-    setJobs(js.jobs || []);
+  if (!year || !month || !day || !technikerId) {
+    return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
   }
 
-  async function saveJob() {
-    if (!tagId) return;
-    if (editingId) {
-      const res = await fetch('/api/job', {
-        method:'PATCH', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ id: editingId, ...newJob })
-      });
-      const j = await res.json();
-      if (res.ok) {
-        await reloadDay();
-        setEditingId(undefined);
-        setNewJob({ von:'08:00', bis:'09:00' });
-        onChanged();
-      } else {
-        alert(j.error || 'Fehler beim Speichern');
-      }
-    } else {
-      const res = await fetch('/api/job', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ tagId, technikerId, ...newJob })
-      });
-      const j = await res.json();
-      if (res.ok) {
-        await reloadDay();
-        setNewJob({ von:'08:00', bis:'09:00' });
-        onChanged();
-      } else {
-        alert(j.error || 'Fehler beim Speichern');
-      }
-    }
+  const y = parseInt(year, 10);
+  const m = parseInt(month, 10);
+  const d = parseInt(day, 10);
+  const ymdStr = `${y.toString().padStart(4, '0')}-${m.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
+
+  // Ensure planungsmonat exists
+  let pm = await client.from('planungsmonat')
+    .select('*').eq('jahr', y).eq('monat', m).maybeSingle();
+  if (pm.error && pm.error.code !== 'PGRST116') {
+    return NextResponse.json({ error: pm.error.message }, { status: 500 });
+  }
+  if (!pm.data) {
+    const insPm = await client.from('planungsmonat').insert({
+      jahr: y, monat: m, freitag_nachzuegler: true, feierabend_global: '17:00'
+    }).select('*').single();
+    if (insPm.error) return NextResponse.json({ error: insPm.error.message }, { status: 500 });
+    pm = insPm;
+  }
+  const planungsmonatId = pm.data.id;
+
+  // Ensure tag exists for this date
+  let tag = await client.from('tag').select('*').eq('datum', ymdStr).maybeSingle();
+  if (tag.error && tag.error.code !== 'PGRST116') {
+    return NextResponse.json({ error: tag.error.message }, { status: 500 });
+  }
+  if (!tag.data) {
+    const insTag = await client.from('tag').insert({
+      planungsmonat_id: planungsmonatId,
+      datum: ymdStr
+    }).select('*').single();
+    if (insTag.error) return NextResponse.json({ error: insTag.error.message }, { status: 500 });
+    tag = insTag;
   }
 
-  async function saveStatus(next:string, hinweis?:string|null) {
-    if (!tagId) return;
-    const res = await fetch('/api/status', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ tagId, technikerId, status: next, hinweis: hinweis ?? null })
-    });
-    if (res.ok) { setStatus(next); onChanged(); }
-  }
+  const tagId = tag.data.id;
 
-  async function deleteJob(id:string) {
-    const res = await fetch('/api/job', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id }) });
-    if (res.ok) { await reloadDay(); onChanged(); }
-    else { const e = await res.json(); alert(e.error||'Löschen fehlgeschlagen'); }
-  }
+  // Fetch jobs for this techniker and tag
+  const jobs = await client.from('job').select('*').eq('techniker_id', technikerId).eq('tag_id', tagId);
 
-  if (!open) return null;
+  // Fetch additional data for dropdowns
+  const aufgaben = await client.from('aufgabe').select('*');
+  const objekte = await client.from('objekt').select('*');
+  const orte = await client.from('ort').select('*');
+  const techniker = await client.from('techniker').select('*');
 
-  const dstr = `${String(day).padStart(2,'0')}.${String(month).padStart(2,'0')}.${year}`;
+  // Fetch status for this techniker and tag
+  const statusRes = await client.from('status').select('*').eq('techniker_id', technikerId).eq('tag_id', tagId).maybeSingle();
 
-  return (
-    <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose}/>
-      <div className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-xl p-4 overflow-auto">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <div className="text-xs text-gray-500">Planungstag</div>
-            <div className="font-semibold">{technikerName} • {dstr}</div>
-          </div>
-          <button className="text-sm px-3 py-1 rounded border" onClick={onClose}>Schließen</button>
-        </div>
-
-        {/* Status */}
-        <div className="mb-4">
-          <div className="text-xs text-gray-500 mb-1">Status</div>
-          <div className="flex gap-2 flex-wrap">
-            {['verfuegbar','krank','urlaub','helfer'].map(s=>(
-              <button key={s}
-                onClick={()=>saveStatus(s)}
-                className={`px-3 py-1 rounded border text-sm ${status===s?'bg-gray-900 text-white':''}`}>
-                {s}
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-2 flex gap-2">
-            <button
-              className="px-3 py-1 rounded border text-sm"
-              onClick={()=>saveStatus(status, 'closed')}
-            >
-              Tag abschließen
-            </button>
-            <button
-              className="px-3 py-1 rounded border text-sm"
-              onClick={()=>saveStatus(status, null)}
-            >
-              Abschluss zurücknehmen
-            </button>
-          </div>
-        </div>
-
-        {/* Jobs vorhandene */}
-        <div className="mb-4">
-          <div className="text-xs text-gray-500 mb-1">Vorhandene Einsätze</div>
-          <ul className="space-y-2 text-sm">
-            {jobs.map(j=>(
-              <li key={j.id} className="border rounded p-2">
-                <div className="flex items-center justify-between">
-                  <div className="font-medium">{j.von}–{j.bis} • {j.meldungsnummer || 'ohne Meldung'}</div>
-                  <div className="flex gap-3">
-                    <button className="text-xs underline"
-                      onClick={()=>{ setEditingId(j.id as string); setNewJob({
-                        meldungsnummer: j.meldungsnummer||'',
-                        von: j.von||'08:00', bis: j.bis||'09:00',
-                        aufgabe_id: j.aufgabe_id, objekt_id: j.objekt_id, ort_id: j.ort_id,
-                        plz: j.plz||'', helfer_id: j.helfer_id, bemerkung: j.bemerkung||''
-                      })}}>✏️ bearbeiten</button>
-                    <button className="text-xs underline text-red-600" onClick={()=>deleteJob(j.id as string)}>✖️ löschen</button>
-                  </div>
-                </div>
-                {j.bemerkung && <div className="text-gray-600">{j.bemerkung}</div>}
-              </li>
-            ))}
-            {!jobs.length && <li className="text-gray-500">Keine Einsätze</li>}
-          </ul>
-        </div>
-
-        {/* Neuer/zu bearbeitender Job */}
-        <div className="mb-2 font-semibold">{editingId ? 'Einsatz bearbeiten' : 'Neuer Einsatz'}</div>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="col-span-2">
-            <label className="text-xs">Meldungsnummer</label>
-            <input className="w-full border rounded px-2 py-1"
-              value={newJob.meldungsnummer||''}
-              onChange={e=>setNewJob(v=>({...v, meldungsnummer:e.target.value}))}/>
-          </div>
-          <div>
-            <label className="text-xs">Von</label>
-            <select className="w-full border rounded px-2 py-1"
-              value={newJob.von} onChange={e=>setNewJob(v=>({...v, von:e.target.value}))}>
-              {TIMES.map(t=><option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs">Bis</label>
-            <select className="w-full border rounded px-2 py-1"
-              value={newJob.bis} onChange={e=>setNewJob(v=>({...v, bis:e.target.value}))}>
-              {TIMES.map(t=><option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-
-          <div>
-            <label className="text-xs">Aufgabe</label>
-            <select className="w-full border rounded px-2 py-1"
-              value={newJob.aufgabe_id||''}
-              onChange={e=>setNewJob(v=>({...v, aufgabe_id:e.target.value||undefined}))}>
-              <option value="">–</option>
-              {aufgaben.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs">Objekt</label>
-            <select className="w-full border rounded px-2 py-1"
-              value={newJob.objekt_id||''}
-              onChange={e=>setNewJob(v=>({...v, objekt_id:e.target.value||undefined}))}>
-              <option value="">–</option>
-              {objekte.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
-            </select>
-          </div>
-
-          <div>
-            <label className="text-xs">Ort</label>
-            <select className="w-full border rounded px-2 py-1"
-              value={newJob.ort_id||''}
-              onChange={e=>setNewJob(v=>({...v, ort_id:e.target.value||undefined}))}>
-              <option value="">–</option>
-              {orte.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs">PLZ</label>
-            <input className="w-full border rounded px-2 py-1"
-              value={newJob.plz||''}
-              onChange={e=>setNewJob(v=>({...v, plz:e.target.value}))}/>
-          </div>
-
-          <div>
-            <label className="text-xs">Helfer</label>
-            <select className="w-full border rounded px-2 py-1"
-              value={newJob.helfer_id||''}
-              onChange={e=>setNewJob(v=>({...v, helfer_id:e.target.value||undefined}))}>
-              <option value="">–</option>
-              {helfer.map(h=><option key={h.id} value={h.id}>{h.label}</option>)}
-            </select>
-          </div>
-          <div className="col-span-2">
-            <label className="text-xs">Bemerkung</label>
-            <textarea className="w-full border rounded px-2 py-1"
-              value={newJob.bemerkung||''}
-              onChange={e=>setNewJob(v=>({...v, bemerkung:e.target.value}))}/>
-          </div>
-        </div>
-
-        <div className="mt-3 flex gap-2">
-          <button className="px-3 py-2 rounded bg-black text-white text-sm" onClick={saveJob}>
-            {editingId ? 'Änderungen speichern' : 'Einsatz speichern'}
-          </button>
-          {editingId && (
-            <button className="px-3 py-2 rounded border text-sm" onClick={()=>{ setEditingId(undefined); setNewJob({ von:'08:00', bis:'09:00' }); }}>
-              Abbrechen
-            </button>
-          )}
-          <button className="px-3 py-2 rounded border text-sm" onClick={onClose}>Schließen</button>
-        </div>
-      </div>
-    </div>
-  );
+  return NextResponse.json({
+    tagId,
+    status: statusRes.data?.status,
+    jobs: jobs.data,
+    aufgaben: aufgaben.data,
+    objekte: objekte.data,
+    orte: orte.data,
+    techniker: techniker.data,
+  });
 }
