@@ -79,8 +79,15 @@ export async function GET(req: Request) {
   if (jobs.error) return NextResponse.json({ error: jobs.error.message }, { status: 500 });
 
   return NextResponse.json({
-    tagId, feierabend, status,
-    aufgaben: aufg.data, objekte: obj.data, orte: orte.data, techniker: techs.data,
+    tagId,
+    feierabend,
+    status,
+    statusHinweis: st.data?.hinweis ?? null,
+    closed: (st.data?.hinweis ?? null) === 'closed',
+    aufgaben: aufg.data,
+    objekte: obj.data,
+    orte: orte.data,
+    techniker: techs.data,
     jobs: jobs.data
   });
 }

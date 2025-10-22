@@ -32,7 +32,7 @@ export async function GET(req: Request) {
   const feierabendGlobal = pm?.feierabend_global || '17:00:00';
   const freitagNachzuegler = pm?.freitag_nachzuegler ?? true;
 
-  // Tage des Monats (einfach per String-Range)
+  // Tage des Monats (String-Range, TZ-sicher)
   const dim = new Date(year, month, 0).getDate();
   const start = ymd(year, month, 1);
   const end = ymd(year, month, dim);
