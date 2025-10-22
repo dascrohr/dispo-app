@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 type Opt = { id: string; label: string };
 type Job = {
@@ -36,6 +36,7 @@ export default function TagDrawer(props: {
   const [orte, setOrte] = useState<Opt[]>([]);
   const [helfer, setHelfer] = useState<Opt[]>([]);
   const [newJob, setNewJob] = useState<Job>({ von:'08:00', bis:'09:00' });
+  const [editingId, setEditingId] = useState<string|undefined>();
 
   useEffect(() => {
     if (!open) return;
@@ -53,32 +54,57 @@ export default function TagDrawer(props: {
       }).finally(()=>setLoading(false));
   }, [open, year, month, day, technikerId]);
 
+  async function reloadDay() {
+    const r = await fetch(`/api/day?year=${year}&month=${month}&day=${day}&technikerId=${technikerId}`, { cache: 'no-store' });
+    const js = await r.json();
+    setJobs(js.jobs || []);
+  }
+
   async function saveJob() {
     if (!tagId) return;
-    const res = await fetch('/api/job', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ tagId, technikerId, ...newJob })
-    });
-    const j = await res.json();
-    if (res.ok) {
-      // reload jobs
-      const r = await fetch(`/api/day?year=${year}&month=${month}&day=${day}&technikerId=${technikerId}`, { cache: 'no-store' });
-      const js = await r.json();
-      setJobs(js.jobs || []);
-      setNewJob({ von:'08:00', bis:'09:00' });
-      onChanged();
+    if (editingId) {
+      const res = await fetch('/api/job', {
+        method:'PATCH', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ id: editingId, ...newJob })
+      });
+      const j = await res.json();
+      if (res.ok) {
+        await reloadDay();
+        setEditingId(undefined);
+        setNewJob({ von:'08:00', bis:'09:00' });
+        onChanged();
+      } else {
+        alert(j.error || 'Fehler beim Speichern');
+      }
     } else {
-      alert(j.error || 'Fehler beim Speichern');
+      const res = await fetch('/api/job', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ tagId, technikerId, ...newJob })
+      });
+      const j = await res.json();
+      if (res.ok) {
+        await reloadDay();
+        setNewJob({ von:'08:00', bis:'09:00' });
+        onChanged();
+      } else {
+        alert(j.error || 'Fehler beim Speichern');
+      }
     }
   }
 
-  async function saveStatus(next:string) {
+  async function saveStatus(next:string, hinweis?:string|null) {
     if (!tagId) return;
     const res = await fetch('/api/status', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ tagId, technikerId, status: next })
+      body: JSON.stringify({ tagId, technikerId, status: next, hinweis: hinweis ?? null })
     });
     if (res.ok) { setStatus(next); onChanged(); }
+  }
+
+  async function deleteJob(id:string) {
+    const res = await fetch('/api/job', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id }) });
+    if (res.ok) { await reloadDay(); onChanged(); }
+    else { const e = await res.json(); alert(e.error||'Löschen fehlgeschlagen'); }
   }
 
   if (!open) return null;
@@ -109,24 +135,51 @@ export default function TagDrawer(props: {
               </button>
             ))}
           </div>
+
+          <div className="mt-2 flex gap-2">
+            <button
+              className="px-3 py-1 rounded border text-sm"
+              onClick={()=>saveStatus(status, 'closed')}
+            >
+              Tag abschließen
+            </button>
+            <button
+              className="px-3 py-1 rounded border text-sm"
+              onClick={()=>saveStatus(status, null)}
+            >
+              Abschluss zurücknehmen
+            </button>
+          </div>
         </div>
 
         {/* Jobs vorhandene */}
         <div className="mb-4">
           <div className="text-xs text-gray-500 mb-1">Vorhandene Einsätze</div>
-          <ul className="space-y-1 text-sm">
+          <ul className="space-y-2 text-sm">
             {jobs.map(j=>(
               <li key={j.id} className="border rounded p-2">
-                <div className="font-medium">{j.von}–{j.bis} • {j.meldungsnummer || 'ohne Meldung'}</div>
-                <div className="text-gray-600">{j.bemerkung}</div>
+                <div className="flex items-center justify-between">
+                  <div className="font-medium">{j.von}–{j.bis} • {j.meldungsnummer || 'ohne Meldung'}</div>
+                  <div className="flex gap-3">
+                    <button className="text-xs underline"
+                      onClick={()=>{ setEditingId(j.id as string); setNewJob({
+                        meldungsnummer: j.meldungsnummer||'',
+                        von: j.von||'08:00', bis: j.bis||'09:00',
+                        aufgabe_id: j.aufgabe_id, objekt_id: j.objekt_id, ort_id: j.ort_id,
+                        plz: j.plz||'', helfer_id: j.helfer_id, bemerkung: j.bemerkung||''
+                      })}}>✏️ bearbeiten</button>
+                    <button className="text-xs underline text-red-600" onClick={()=>deleteJob(j.id as string)}>✖️ löschen</button>
+                  </div>
+                </div>
+                {j.bemerkung && <div className="text-gray-600">{j.bemerkung}</div>}
               </li>
             ))}
             {!jobs.length && <li className="text-gray-500">Keine Einsätze</li>}
           </ul>
         </div>
 
-        {/* Neuer Job */}
-        <div className="mb-2 font-semibold">Neuer Einsatz</div>
+        {/* Neuer/zu bearbeitender Job */}
+        <div className="mb-2 font-semibold">{editingId ? 'Einsatz bearbeiten' : 'Neuer Einsatz'}</div>
         <div className="grid grid-cols-2 gap-2">
           <div className="col-span-2">
             <label className="text-xs">Meldungsnummer</label>
@@ -203,8 +256,13 @@ export default function TagDrawer(props: {
 
         <div className="mt-3 flex gap-2">
           <button className="px-3 py-2 rounded bg-black text-white text-sm" onClick={saveJob}>
-            Einsatz speichern
+            {editingId ? 'Änderungen speichern' : 'Einsatz speichern'}
           </button>
+          {editingId && (
+            <button className="px-3 py-2 rounded border text-sm" onClick={()=>{ setEditingId(undefined); setNewJob({ von:'08:00', bis:'09:00' }); }}>
+              Abbrechen
+            </button>
+          )}
           <button className="px-3 py-2 rounded border text-sm" onClick={onClose}>Schließen</button>
         </div>
       </div>
