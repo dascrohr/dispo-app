@@ -60,7 +60,7 @@ export async function PATCH(req: Request) {
     updates.von = vVon; updates.bis = vBis;
     updates.dauer_min = round15(minutesBetween(vVon!, vBis!));
   }
-  const up = await client.from('job').update(updates).select('*').eq('id', id).single();
+  const up = await client.from('job').update(updates).eq('id', id).select('*').single();
   if (up.error) return NextResponse.json({ error: up.error.message }, { status: 500 });
   return NextResponse.json({ ok: true, job: up.data });
 }
