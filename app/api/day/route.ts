@@ -15,7 +15,7 @@ export async function GET(req: Request) {
   if (pm.error) return NextResponse.json({ error: pm.error.message }, { status: 500 });
   if (!pm.data) return NextResponse.json({ error: 'Planungsmonat fehlt' }, { status: 404 });
 
-  const ymd = new Date(y, m - 1, d).toISOString().slice(0, 10);
+  const ymd = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
   const tag = await client.from('tag').select('*').eq('datum', ymd).maybeSingle();
   if (tag.error) return NextResponse.json({ error: tag.error.message }, { status: 500 });
 

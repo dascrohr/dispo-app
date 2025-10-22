@@ -59,7 +59,7 @@ export default function Page() {
         for (const t of tg) {
           out[t.id] = {};
           for (let d = 1; d <= dim; d++) {
-            const ymd = new Date(year, month - 1, d).toISOString().slice(0, 10);
+            const ymd = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
             const cell = json.data[t.id]?.[ymd];
             out[t.id][d] = cell
               ? {
