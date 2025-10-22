@@ -47,7 +47,7 @@ export default function Page() {
     (async () => {
       setLoading(true);
       try {
-        const r = await fetch(`/api/board?year=${year}&month=${month}`, { cache: 'no-store' });
+        const r = await fetch(`/api/board?year=${year}&month=${month}&tick=${Date.now()}`, { cache: 'no-store' });
         if (!r.ok) throw new Error(`API ${r.status}`);
         const json: ApiData = await r.json();
         if (cancelled) return;
