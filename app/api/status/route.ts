@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabaseServer';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: Request) {
   const client = supabaseServer();
   const { tagId, technikerId, status, hinweis } = await req.json();
@@ -8,7 +10,7 @@ export async function POST(req: Request) {
 
   // upsert via unique(tag_id, techniker_id)
   const up = await client.from('tag_status').upsert(
-    { tag_id: tagId, techniker_id: technikerId, status, hinweis },
+    { tag_id: tagId, techniker_id: technikerId, status, hinweis: (hinweis ?? null) === '' ? null : (hinweis ?? null) },
     { onConflict: 'tag_id,techniker_id' }
   );
   if (up.error) return NextResponse.json({ error: up.error.message }, { status: 500 });

@@ -1,6 +1,14 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabaseServer';
 
+export const dynamic = 'force-dynamic';
+
+function ymd(year:number, month:number, day:number) {
+  const mm = String(month).padStart(2,'0');
+  const dd = String(day).padStart(2,'0');
+  return `${year}-${mm}-${dd}`;
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const y = Number(searchParams.get('year'));
@@ -9,43 +17,66 @@ export async function GET(req: Request) {
   const technikerId = String(searchParams.get('technikerId'));
   const client = supabaseServer();
 
-  // Planungsmonat + Tag holen
-  const pm = await client.from('planungsmonat')
+  if (!y || !m || !d || !technikerId) {
+    return NextResponse.json({ error: 'Missing required params' }, { status: 400 });
+  }
+
+  const ymdStr = ymd(y,m,d);
+
+  // 1) Ensure planungsmonat exists (create if missing)
+  let pm = await client.from('planungsmonat')
     .select('*').eq('jahr', y).eq('monat', m).maybeSingle();
-  if (pm.error) return NextResponse.json({ error: pm.error.message }, { status: 500 });
-  if (!pm.data) return NextResponse.json({ error: 'Planungsmonat fehlt' }, { status: 404 });
+  if (pm.error && pm.error.code !== 'PGRST116') {
+    return NextResponse.json({ error: pm.error.message }, { status: 500 });
+  }
+  if (!pm.data) {
+    const inserted = await client.from('planungsmonat').insert({
+      jahr: y, monat: m, freitag_nachzuegler: true, feierabend_global: '17:00'
+    }).select('*').single();
+    if (inserted.error) return NextResponse.json({ error: inserted.error.message }, { status: 500 });
+    pm = inserted;
+  }
 
-  const ymd = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-  const tag = await client.from('tag').select('*').eq('datum', ymd).maybeSingle();
-  if (tag.error) return NextResponse.json({ error: tag.error.message }, { status: 500 });
+  // 2) Ensure tag (day) exists (create if missing)
+  let tag = await client.from('tag').select('*').eq('datum', ymdStr).maybeSingle();
+  if (tag.error && tag.error.code !== 'PGRST116') {
+    return NextResponse.json({ error: tag.error.message }, { status: 500 });
+  }
+  if (!tag.data) {
+    const inserted = await client.from('tag').insert({
+      planungsmonat_id: pm.data.id,
+      datum: ymdStr
+    }).select('*').single();
+    if (inserted.error) return NextResponse.json({ error: inserted.error.message }, { status: 500 });
+    tag = inserted;
+  }
 
-  const tagId = tag.data?.id;
-  const feierabend = (tag.data?.feierabend_uebersteuerung || pm.data.feierabend_global) as string;
+  const tagId = tag.data.id as string;
+  const feierabend = (tag.data.feierabend_uebersteuerung || pm.data.feierabend_global) as string;
 
-  // Stammdaten für Dropdowns
+  // 3) Dropdown master data
   const [aufg, obj, orte, techs] = await Promise.all([
     client.from('aufgabe').select('id, code').order('code', { ascending: true }),
     client.from('objekt').select('id, code').order('code', { ascending: true }),
     client.from('ort').select('id, plz, ort').limit(5000),
     client.from('techniker').select('id, name').eq('aktiv', true).order('name')
   ]);
-  for (const r of [aufg, obj, orte, techs]) if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
-
-  // Status für den Tag
-  let status: string | null = null;
-  if (tagId) {
-    const st = await client.from('tag_status').select('status')
-      .eq('tag_id', tagId).eq('techniker_id', technikerId).maybeSingle();
-    if (st.error && st.error.code !== 'PGRST116') return NextResponse.json({ error: st.error.message }, { status: 500 });
-    status = st.data?.status ?? 'verfuegbar';
+  for (const r of [aufg, obj, orte, techs]) {
+    if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
   }
 
-  // Jobs für den Tag/Techniker
-  const jobs = tagId ? await client.from('job')
-    .select('id, meldungsnummer, von, bis, dauer_min, aufgabe_id, objekt_id, ort_id, plz, helfer_id, bemerkung')
-    .eq('tag_id', tagId).eq('techniker_id', technikerId).order('von') : { data: [] as any[] };
+  // 4) Status for this techniker/day (may be empty -> default 'verfuegbar')
+  let status: string | null = null;
+  const st = await client.from('tag_status').select('status, hinweis')
+    .eq('tag_id', tagId).eq('techniker_id', technikerId).maybeSingle();
+  if (st.error && st.error.code !== 'PGRST116') return NextResponse.json({ error: st.error.message }, { status: 500 });
+  status = st.data?.status ?? 'verfuegbar';
 
-  if ('error' in jobs && jobs.error) return NextResponse.json({ error: jobs.error.message }, { status: 500 });
+  // 5) Jobs for this techniker/day
+  const jobs = await client.from('job')
+    .select('id, meldungsnummer, von, bis, dauer_min, aufgabe_id, objekt_id, ort_id, plz, helfer_id, bemerkung')
+    .eq('tag_id', tagId).eq('techniker_id', technikerId).order('von');
+  if (jobs.error) return NextResponse.json({ error: jobs.error.message }, { status: 500 });
 
   return NextResponse.json({
     tagId, feierabend, status,
