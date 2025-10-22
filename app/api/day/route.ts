@@ -66,11 +66,10 @@ export async function GET(req: Request) {
   }
 
   // 4) Status for this techniker/day (may be empty -> default 'verfuegbar')
-  let status: string | null = null;
   const st = await client.from('tag_status').select('status, hinweis')
     .eq('tag_id', tagId).eq('techniker_id', technikerId).maybeSingle();
   if (st.error && st.error.code !== 'PGRST116') return NextResponse.json({ error: st.error.message }, { status: 500 });
-  status = st.data?.status ?? 'verfuegbar';
+  const status = st.data?.status ?? 'verfuegbar';
 
   // 5) Jobs for this techniker/day
   const jobs = await client.from('job')
