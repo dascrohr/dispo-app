@@ -102,10 +102,12 @@ export default function TagDrawer(props: {
         body: JSON.stringify({ tagId, technikerId, status: next, hinweis: hinweis ?? null })
       });
       const j = await res.json().catch(()=>({}));
-      if (!res.ok) throw new Error(j.error || `Status API ${res.status}`);
-      setStatus(next);
-      await reloadDay();   // Drawer-Liste aktualisieren
-      onChanged();         // Board neu laden
+      if (res.ok) {
+        setStatus(next);
+        await new Promise(r => setTimeout(r, 80)); // kleine Pause
+        await reloadDay(); // Drawer neu laden
+        onChanged(); // Board neu laden
+      }
     } catch (e:any) {
       alert(e.message || 'Status setzen fehlgeschlagen');
     }
