@@ -37,19 +37,25 @@ export async function GET(req: Request) {
     pm = inserted;
   }
 
-  // 2) Ensure tag (day) exists (create if missing)
-  let tag = await client.from('tag').select('*').eq('datum', ymdStr).maybeSingle();
-  if (tag.error && tag.error.code !== 'PGRST116') {
-    return NextResponse.json({ error: tag.error.message }, { status: 500 });
-  }
-  if (!tag.data) {
-    const inserted = await client.from('tag').insert({
-      planungsmonat_id: pm.data.id,
-      datum: ymdStr
-    }).select('*').single();
-    if (inserted.error) return NextResponse.json({ error: inserted.error.message }, { status: 500 });
-    tag = inserted;
-  }
+// 2) Ensure tag (day) exists (create if missing) — SCOPED TO THIS PLANUNGSMONAT
+let tag = await client
+  .from('tag')
+  .select('*')
+  .eq('datum', ymdStr)
+  .eq('planungsmonat_id', pm.data.id)   // <— wichtig
+  .maybeSingle();
+
+if (tag.error && tag.error.code !== 'PGRST116') {
+  return NextResponse.json({ error: tag.error.message }, { status: 500 });
+}
+if (!tag.data) {
+  const inserted = await client.from('tag').insert({
+    planungsmonat_id: pm.data.id,
+    datum: ymdStr
+  }).select('*').single();
+  if (inserted.error) return NextResponse.json({ error: inserted.error.message }, { status: 500 });
+  tag = inserted;
+}
 
   const tagId = tag.data.id as string;
   const feierabend = (tag.data.feierabend_uebersteuerung || pm.data.feierabend_global) as string;
