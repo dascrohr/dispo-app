@@ -10,7 +10,7 @@ type CellProps = {
 
 function isFullDay(totalMin: number, feierabendMin: number, closed?: boolean) {
   if (closed) return true;
-  // Voll wenn mindestens 8h geplant UND der definierte Feierabend 17:00 (>= 540 Min) ist
+  // Voll, wenn mindestens 8h geplant UND definierter Feierabend 17:00 (>=540)
   return totalMin >= 480 && feierabendMin >= 540;
 }
 
@@ -21,20 +21,21 @@ function solidBg(
   feierabendMin: number,
   closed?: boolean
 ) {
+  // Priorität 1: Statusfarben
   if (status === 'krank' || status === 'urlaub' || status === 'helfer') return 'bg-blue-200';
+  // Priorität 2: Freitag frei
   if (isFriday && totalMin === 0) return 'bg-green-200';
+  // Priorität 3: Kein Eintrag
   if (totalMin === 0) return 'bg-red-200';
+  // Priorität 4: Voll oder abgeschlossen
   if (isFullDay(totalMin, feierabendMin, closed)) {
-    // Voll oder manuell abgeschlossen => vollständig gelb
     return totalMin > feierabendMin ? 'bg-yellow-400' : 'bg-yellow-200';
   }
-  // partial wird separat als Gradient gezeichnet
+  // Partial: wird unten per Gradient überlagert
   return '';
 }
 
-export default function BoardCell(props: CellProps) {
-  const { status, isFriday, totalMin, feierabendMin, closed } = props;
-
+export default function BoardCell({ status, isFriday, totalMin, feierabendMin, closed }: CellProps) {
   const partial =
     status === 'verfuegbar' &&
     totalMin > 0 &&
@@ -44,8 +45,6 @@ export default function BoardCell(props: CellProps) {
   const bgClass = solidBg(status, isFriday, totalMin, feierabendMin, closed);
   const hours = (totalMin / 60).toFixed(1);
 
-  // Farben an Tailwind angelehnt:
-  // Gelb ≈ #FDE68A (yellow-300), Rot ≈ #FECACA (red-200)
   const style = partial
     ? { backgroundImage: 'linear-gradient(135deg, #FDE68A 50%, #FECACA 50%)' }
     : undefined;
